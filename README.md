@@ -1,6 +1,6 @@
 # Socket Messenger
 
-**Projet #27 — Messagerie Socket Python** de la roadmap. Cette application met en pratique les sockets réseau bas niveau de la bibliothèque standard Python avec un serveur TCP multi-client, un client CLI interactif et une découverte de services en UDP sur le réseau local.
+Messagerie Socket Python** de la roadmap. Cette application met en pratique les sockets réseau bas niveau de la bibliothèque standard Python avec un serveur TCP multi-client, un client CLI interactif et une découverte de services en UDP sur le réseau local.
 
 ## Fonctionnalités
 
