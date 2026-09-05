@@ -9,7 +9,13 @@ from dataclasses import dataclass, field
 from typing import TextIO
 
 from .discovery import DISCOVERY_PORT, DiscoveryResponder
-from .protocol import ProtocolError, decode_message, encode_message, validate_chat, validate_hello
+from .protocol import (
+    ProtocolError,
+    decode_message,
+    encode_message,
+    validate_chat,
+    validate_hello,
+)
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8_765
@@ -122,7 +128,7 @@ class ChatServer:
         while not self._stop.is_set():
             try:
                 connection, address = self._server_socket.accept()
-            except socket.timeout:
+            except TimeoutError:
                 continue
             except OSError:
                 return

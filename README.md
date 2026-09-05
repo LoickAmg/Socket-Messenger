@@ -120,7 +120,6 @@ socket-messenger/
 │   ├── __main__.py
 │   ├── client.py
 │   ├── discovery.py
-│   ├── main.py
 │   ├── protocol.py
 │   └── server.py
 ├── tests/

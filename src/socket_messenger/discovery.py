@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import socket
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator
 
 DISCOVERY_PORT = 37_020
 DISCOVER_REQUEST = b"SOCKET_MESSENGER_DISCOVER\n"
@@ -40,10 +40,10 @@ class DiscoveryResponder:
             sock.settimeout(0.5)
             while not self._stop.is_set():
                 try:
-                    data, address = sock.recvfrom(1_024)
-                except socket.timeout:
+                    datagram, address = sock.recvfrom(1_024)
+                except TimeoutError:
                     continue
-                if data.strip() != DISCOVER_REQUEST.strip():
+                if datagram.strip() != DISCOVER_REQUEST.strip():
                     continue
                 payload = {
                     "service": "socket-messenger",
@@ -76,11 +76,11 @@ def discover(
         sock.sendto(DISCOVER_REQUEST, (broadcast_address, port))
         while True:
             try:
-                data, address = sock.recvfrom(4_096)
-            except socket.timeout:
+                response_bytes, address = sock.recvfrom(4_096)
+            except TimeoutError:
                 return
             try:
-                payload = json.loads(data.decode("utf-8"))
+                payload = json.loads(response_bytes.decode("utf-8"))
                 if payload.get("service") != "socket-messenger":
                     continue
                 name = payload["name"]
