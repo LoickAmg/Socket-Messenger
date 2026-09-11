@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import socket
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TextIO
 
 from .discovery import DISCOVERY_PORT, DiscoveryResponder
 from .protocol import (
+    MAX_LINE_BYTES,
     ProtocolError,
     decode_message,
     encode_message,
@@ -19,6 +20,36 @@ from .protocol import (
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8_765
+_RECV_CHUNK_BYTES = 4_096
+
+
+def _iter_lines(connection: socket.socket, max_line_bytes: int = MAX_LINE_BYTES) -> Iterator[bytes]:
+    """Yield newline-terminated protocol lines read from `connection`.
+
+    Reads in small, bounded chunks via `recv()` instead of delegating to a
+    buffered file object (`socket.makefile().readline()`). That buffered
+    reader has no upper bound of its own: a peer that keeps streaming bytes
+    without ever sending `\n` makes it grow its internal buffer forever,
+    since `decode_message`'s size check only runs on a *complete* line —
+    one that never arrives is never checked, and the server keeps buffering
+    the whole stream in memory (a trivial denial-of-service). Here, once
+    unterminated data in the buffer exceeds `max_line_bytes`, the read is
+    aborted immediately regardless of whether a newline ever shows up.
+    """
+    buffer = bytearray()
+    while True:
+        newline_index = buffer.find(b"\n")
+        while newline_index != -1:
+            line = bytes(buffer[: newline_index + 1])
+            del buffer[: newline_index + 1]
+            yield line
+            newline_index = buffer.find(b"\n")
+        if len(buffer) > max_line_bytes:
+            raise ProtocolError("Message too large")
+        chunk = connection.recv(_RECV_CHUNK_BYTES)
+        if not chunk:
+            return
+        buffer += chunk
 
 
 @dataclass
@@ -142,10 +173,15 @@ class ChatServer:
 
     def _handle_client(self, connection: socket.socket, address: tuple[str, int]) -> None:
         client: _Client | None = None
-        reader: TextIO | None = None
         try:
-            reader = connection.makefile("r", encoding="utf-8", newline="\n")
-            first_line = reader.readline()
+            line_iter = _iter_lines(connection)
+            try:
+                first_line = next(line_iter, None)
+            except ProtocolError as exc:
+                # Flot sans retour à la ligne dépassant la taille max avant
+                # même le hello : on prévient si possible, puis on coupe.
+                self._send_raw(connection, {"type": "error", "message": str(exc)})
+                return
             if not first_line:
                 return
             try:
@@ -164,18 +200,25 @@ class ChatServer:
                 {"type": "system", "event": "join", "username": username, "message": f"{username} joined the chat."},
                 exclude=connection,
             )
-            for line in reader:
+            try:
+                for line in line_iter:
+                    try:
+                        text = validate_chat(decode_message(line))
+                    except ProtocolError as exc:
+                        self._send(client, {"type": "error", "message": str(exc)})
+                        continue
+                    self._broadcast({"type": "chat", "username": username, "text": text})
+            except ProtocolError as exc:
+                # Même cas de flot excessif que ci-dessus, mais après le
+                # hello : on avertit ce client précis puis on coupe sa
+                # connexion (les autres ne sont pas affectés).
                 try:
-                    text = validate_chat(decode_message(line))
-                except ProtocolError as exc:
                     self._send(client, {"type": "error", "message": str(exc)})
-                    continue
-                self._broadcast({"type": "chat", "username": username, "text": text})
+                except OSError:
+                    pass
         except (ConnectionError, OSError):
             pass
         finally:
-            if reader is not None:
-                reader.close()
             if client is not None:
                 with self._clients_lock:
                     was_present = self._clients.pop(connection, None) is not None
